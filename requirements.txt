@@ -1,0 +1,4 @@
+PyYAML==3.12
+pandas==0.23.4
+twython==3.7.0
+feedgen==0.7.0
