@@ -77,6 +77,7 @@ def put_tweets(cfg, query, conn):
                     dict_['url'].append(url)
         else:
             dict_['url'].append('Null')
+        dict_['scanned'].append('false')
 
     # Create pandas dataframe. orient='index' allows me to handle empty fields, yuo also hae to transpose the dataframe
     df = pd.DataFrame.from_dict(dict_, orient='index')  

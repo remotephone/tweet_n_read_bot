@@ -15,11 +15,11 @@ def slow_down(func):
     return wrapper_slow_down
 
 @slow_down
-
 class VirusTotaler:
     def __init__(self, cfg):
         self.cfg = cfg
         apikey = self.cfg['virustotal']['apikey']
+
 
     def process_url(self, url):
         pass
@@ -36,8 +36,12 @@ class VirusTotaler:
         response = response.json()
 
         if response['response_code'] == -2:
-            logger.info('[!] - Url {} not ready, sleeping'.format(url)
+            logger.info('[!] - Url {} not ready, sleeping'.format(url))
             sleep(5)
+            self.vt_get(self, url)
+        elif response['response_code'] == 0:
+            self.vt_put(self, url)
+        else:
             return url_tocheck
 
         print(response)
