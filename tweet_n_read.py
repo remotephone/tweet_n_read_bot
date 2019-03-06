@@ -1,6 +1,8 @@
+import functools
 import json
 import os
 import sqlite3
+import time
 
 import pandas as pd
 import requests
@@ -9,8 +11,6 @@ from twython import Twython
 
 import logs.logtweets as logtweets
 from safety_check import VirusTotaler
-
-
 
 CURRENTDIR = os.path.dirname(__file__)
 print(CURRENTDIR)
@@ -39,7 +39,7 @@ def put_tweets(cfg, query, conn):
 
 
     # Create dictionary to search tweets and get them
-    dict_ = {'user': [], 'date': [], 'text': [], 'favorite_count': [], 'url': []}
+    dict_ = {'user': [], 'date': [], 'text': [], 'favorite_count': [], 'url': [], 'scanned': [], 'positives': []}
     python_tweets = Twython(cfg['twitter']['CONSUMER_KEY'], cfg['twitter']['CONSUMER_SECRET'])
 
 
@@ -47,40 +47,42 @@ def put_tweets(cfg, query, conn):
     # I only care about a few values, like name, create date, text, and urls
     # Twitter will extract URLs from tweets and expand them out
     logger.info('[-] {} tweets to process for {}'.format(len(python_tweets.search(**query)['statuses']), query['q']))
-    for status in python_tweets.search(**query)['statuses']:  
-        dict_['user'].append(status['user']['screen_name'])
-        dict_['date'].append(status['created_at'])
-        dict_['text'].append(status['text'])
-        # dict_['favorite_count'].append(status['favorite_count'])
-
-        # Handle some tweet logic
-        # Create a set so we don't have dupicates, go through URLs and add them to list
-        # loop through, expand out twitter URLs, keep adding them to set 
-        # keep iterating through set until all twitter urls are removed
-        temp_list = set()
+    for status in python_tweets.search(**query)['statuses']:
         if status['entities']['urls']:
-            for url in status['entities']['urls']:
-                temp_list.add(url['expanded_url'])
-        for url in temp_list:
-            if 'twitter.com/i/web/status' in url:
-                status_id = url.split('/')[-1]
-                tweet = python_tweets.show_status(id=status_id)
-                for url in tweet['entities']['urls']:
-                    if url['expanded_url']:
-                        print(url)
-                        url = url['expanded_url']
-                        temp_list.add(url)
+            dict_['user'].append(status['user']['screen_name'])
+            dict_['date'].append(status['created_at'])
+            dict_['text'].append(status['text'])
+            # dict_['favorite_count'].append(status['favorite_count'])
+
+            # Handle some tweet logic
+            # Create a set so we don't have dupicates, go through URLs and add them to list
+            # loop through, expand out twitter URLs, keep adding them to set 
+            # keep iterating through set until all twitter urls are removed
+            temp_list = set()
+            if status['entities']['urls']:
+                for url in status['entities']['urls']:
+                    temp_list.add(url['expanded_url'])
+            for url in temp_list:
+                if 'twitter.com/i/web/status' in url:
+                    status_id = url.split('/')[-1]
+                    tweet = python_tweets.show_status(id=status_id)
+                    for url in tweet['entities']['urls']:
+                        if url['expanded_url']:
+                            print(url)
+                            url = url['expanded_url']
+                            temp_list.add(url)
+                else:
+                    print(url)
+                    temp_list.add(url)
+                    for url in temp_list:
+                        dict_['url'].append(url)
             else:
-                print(url)
-                temp_list.add(url)
-                for url in temp_list:
-                    dict_['url'].append(url)
-        else:
-            dict_['url'].append('Null')
-        dict_['scanned'].append('false')
+                dict_['url'].append('Null')
+            dict_['scanned'].append('false')
+            dict_['positives'].append('0')
 
     # Create pandas dataframe. orient='index' allows me to handle empty fields, yuo also hae to transpose the dataframe
-    df = pd.DataFrame.from_dict(dict_, orient='index')  
+    df = pd.DataFrame.from_dict(dict_, orient='index',)  
     df = df.transpose()
 
     # now we sort them and want to make sure the sql database gets the full value of the column with the max width
@@ -89,33 +91,26 @@ def put_tweets(cfg, query, conn):
 
     # write it to the DB, we don't necessarily need to return.
     # if_exists can be append or replace
-    df.to_sql('tweets', conn, if_exists='append', index=False)
-
-def safety_check(conn):
-
-    urls = conn.execute('SELECT url FROM tweets WHERE url NOT LIKE "Null"')
-    for row in urls:
-        print(row)
-    # iterate through them, they're tuples so we need slice zero, append to list we can work with
-    readings = set()
+    df.to_sql('tweets', conn, if_exists='replace', index=False)
 
 
+def slow_down(func):
+    """Sleep 1 second before calling the function"""
+    @functools.wraps(func)
+    def wrapper_slow_down(*args, **kwargs):
+        logger.info('[-] Sleeper delaying next submissions')
+        time.sleep(15)
+        return func(*args, **kwargs)
+    return wrapper_slow_down
 
-def create_rss(conn, cfg):
-    # Pull each URL from the t able
-    urls = conn.execute('SELECT url FROM tweets WHERE url NOT LIKE "Null"')
-
-    readings = set()
+@slow_down
+def create_rss(cfg, url):
     vt = VirusTotaler(cfg)
 
-    for row in urls:
-        readings.add(row[0])
-        print(row[0])
-        vt.vt_get(row[0])
-        raise SystemExit
-
-    return readings
-
+    logger.info('[-] Safety checking {}'.format(url[0]))
+    positives, reference = vt.process_url(url[0])
+    return positives, reference
+    
 def main():
     
     # Find me and load config from subdirectory
@@ -128,10 +123,13 @@ def main():
     for query in cfg['queries']:
         put_tweets(cfg, query, conn)
 
-    readings = create_rss(conn, cfg)
-    
+    # Pull each URL from the t able
+    urls = conn.execute('SELECT url FROM tweets WHERE url NOT LIKE "Null"')
+
+    for url in urls:
+        positives, reference = create_rss(cfg, url)
+        print(positives, reference)
 
 if __name__ == "__main__":
     logger = logtweets.configure_logger('default', './logs/general.log')
     main()
-
