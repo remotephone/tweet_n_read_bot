@@ -11,16 +11,6 @@ import logs.logtweets as logtweets
 
 logger = logtweets.configure_logger('default', './logs/safety_check.log')
 
-
-def slow_down(func):
-    """Sleep 1 second before calling the function"""
-    @functools.wraps(func)
-    def wrapper_slow_down(*args, **kwargs):
-        time.sleep(1)
-        return func(*args, **kwargs)
-    return wrapper_slow_down
-
-@slow_down
 class VirusTotaler:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -41,12 +31,13 @@ class VirusTotaler:
             url = unshorten_url(response.getheader('Location')) # changed to process chains of short urls
         else:
             url = url
-
-        positives, reference = self.vt_get(url)
-
+        if url:
+            positives, reference = self.vt_get(url)
+        else:
+            pass
         return positives, reference
     def vt_get(self, url):
-
+        print('starting get')
         getendpt = 'https://www.virustotal.com/vtapi/v2/url/report'
         params = {'apikey': self.apikey, 'resource': url}
 
@@ -85,8 +76,8 @@ class VirusTotaler:
 
         response = requests.post(putendpt, data=params)
         print(response.json())
-        time.sleep(2)
-
+        time.sleep(5)
+        print('sending put to get')
         self.vt_get(url)
 
 

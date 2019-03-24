@@ -12,8 +12,11 @@ from twython import Twython
 import logs.logtweets as logtweets
 from safety_check import VirusTotaler
 
+
 CURRENTDIR = os.path.dirname(__file__)
 print(CURRENTDIR)
+COUNT = 0
+
 
 def handle_db():
     try:
@@ -39,7 +42,7 @@ def put_tweets(cfg, query, conn):
 
 
     # Create dictionary to search tweets and get them
-    dict_ = {'user': [], 'date': [], 'text': [], 'favorite_count': [], 'url': [], 'scanned': [], 'positives': []}
+    dict_ = {'user': [], 'date': [], 'text': [], 'favorite_count': [], 'url': [], 'scanned': [], 'positives': [], 'vt_link': []}
     python_tweets = Twython(cfg['twitter']['CONSUMER_KEY'], cfg['twitter']['CONSUMER_SECRET'])
 
 
@@ -52,7 +55,7 @@ def put_tweets(cfg, query, conn):
             dict_['user'].append(status['user']['screen_name'])
             dict_['date'].append(status['created_at'])
             dict_['text'].append(status['text'])
-            # dict_['favorite_count'].append(status['favorite_count'])
+            dict_['favorite_count'].append(status['favorite_count'])
 
             # Handle some tweet logic
             # Create a set so we don't have dupicates, go through URLs and add them to list
@@ -79,7 +82,8 @@ def put_tweets(cfg, query, conn):
             else:
                 dict_['url'].append('Null')
             dict_['scanned'].append('false')
-            dict_['positives'].append('0')
+            dict_['positives'].append(0)
+            dict_['vt_link'].append('Null')
 
     # Create pandas dataframe. orient='index' allows me to handle empty fields, yuo also hae to transpose the dataframe
     df = pd.DataFrame.from_dict(dict_, orient='index',)  
@@ -92,6 +96,7 @@ def put_tweets(cfg, query, conn):
     # write it to the DB, we don't necessarily need to return.
     # if_exists can be append or replace
     df.to_sql('tweets', conn, if_exists='replace', index=False)
+
 
 
 def slow_down(func):
@@ -110,8 +115,9 @@ def create_rss(cfg, url):
     logger.info('[-] Safety checking {}'.format(url[0]))
     positives, reference = vt.process_url(url[0])
     return positives, reference
-    
+
 def main():
+
     
     # Find me and load config from subdirectory
     print(CURRENTDIR)
@@ -127,9 +133,13 @@ def main():
     urls = conn.execute('SELECT url FROM tweets WHERE url NOT LIKE "Null"')
 
     for url in urls:
-        positives, reference = create_rss(cfg, url)
-        print(positives, reference)
-
+        if url:
+            positives, reference = create_rss(cfg, url)
+            print(reference)
+            conn.execute('UPDATE tweets SET scanned="True", positives=?, vt_link=? WHERE url=?', (int(positives),str(reference),str(url)))
+        else:
+            print('No url to parse')
+            pass
 if __name__ == "__main__":
     logger = logtweets.configure_logger('default', './logs/general.log')
     main()
